@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hols!</title>
+
+    <!-- Manifest + iOS-Icon -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#ffffff">
+    <link rel="apple-touch-icon" href="icon.png">
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 16px;
+            background: #9AFF9A; /* hier kannst du die Hintergrundfarbe ändern */
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            font-size: 18px;
+            border-radius: 10px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+
+        .grid {
+            margin-top: 16px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 12px;
+        }
+
+        .tile {
+            background: white;
+            padding: 12px;
+            border-radius: 14px;
+            min-height: 60px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+
+<input id="input" placeholder="Artikel eingeben …">
+
+<div class="grid" id="grid"></div>
+
+<script>
+    const input = document.getElementById("input");
+    const grid = document.getElementById("grid");
+
+    // ---------- IndexedDB helpers ----------
+    const DB_NAME = "tileDB";
+    const STORE = "tiles";
+    const KEY = "items";
+
+    function openDB() {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open(DB_NAME, 1);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    async function dbGetItems() {
+        const db = await openDB();
+        return new Promise((resolve) => {
+            const tx = db.transaction(STORE, "readonly");
+            const store = tx.objectStore(STORE);
+            const req = store.get(KEY);
+            req.onsuccess = () => resolve(req.result ?? []);
+            req.onerror = () => resolve([]);
+        });
+    }
+
+    async function dbSetItems(items) {
+        const db = await openDB();
+        return new Promise((resolve) => {
+            const tx = db.transaction(STORE, "readwrite");
+            tx.objectStore(STORE).put(items, KEY);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => resolve();
+        });
+    }
+
+    async function requestPersistentStorage() {
+        try {
+            if (navigator.storage && navigator.storage.persist) {
+                await navigator.storage.persist();
+            }
+        } catch (_) {}
+    }
+
+    // ---------- App-Logik ----------
+    let items = [];
+
+    function render() {
+        grid.innerHTML = "";
+        items.forEach((text, index) => {
+            const tile = document.createElement("div");
+            tile.className = "tile";
+            tile.textContent = text;
+            tile.onclick = async () => {
+                items.splice(index, 1);
+                await dbSetItems(items);
+                render();
+            };
+            grid.appendChild(tile);
+        });
+    }
+
+    async function init() {
+        await requestPersistentStorage();
+
+        items = await dbGetItems();
+        render();
+
+        input.addEventListener("keydown", async (e) => {
+            if (e.key === "Enter") {
+                const trimmed = input.value.trim();
+                if (!trimmed) return;
+                items.unshift(trimmed);
+                input.value = "";
+                await dbSetItems(items);
+                render();
+            }
+        });
+    }
+
+    init();
+
+    // ---------- Service Worker registrieren ----------
+    if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+            navigator.serviceWorker
+                .register("./sw.js")
+                .catch((err) => console.log("Service Worker Fehler:", err));
+        });
+    }
+</script>
+
+</body>
+</html>
